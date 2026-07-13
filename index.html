@@ -42,6 +42,21 @@
   html.show-share #app{display:none;}
   html.show-rotate #rotateNotice{display:flex;}
   html.show-rotate #app{display:none;}
+  html.show-activation #activationScreen{display:flex;}
+  html.show-activation #app{display:none;}
+  /* activation screen */
+  #activationScreen{display:none; position:fixed; inset:0; z-index:300; background:linear-gradient(160deg,var(--olive-dark),var(--olive)); align-items:center; justify-content:center; padding:1.5rem;}
+  #activationScreen .act-card{background:#fff; border-radius:26px; padding:2.2rem 1.8rem; width:100%; max-width:380px; box-shadow:0 14px 40px rgba(0,0,0,.28); text-align:center;}
+  #activationScreen .act-logo{width:150px; height:auto; margin:0 auto 1rem; display:block; user-select:none;}
+  #activationScreen h1{font-size:30px; color:var(--olive); font-weight:400; margin-bottom:.3rem;}
+  #activationScreen .act-sub{font-family:system-ui; font-size:14px; color:var(--olive-light); margin-bottom:1.4rem; line-height:1.6;}
+  #activationScreen input#activationInput{width:100%; font-family:'Lalezar',sans-serif; letter-spacing:2px; text-align:center; font-size:22px; padding:14px 10px; border-radius:16px; border:2px solid var(--olive-border); color:var(--olive-dark); background:#FBFBF9; direction:ltr; text-transform:uppercase;}
+  #activationScreen input#activationInput:focus{outline:none; border-color:var(--olive);}
+  #activationScreen .act-error{font-family:system-ui; font-size:13px; color:#B23B3B; min-height:18px; margin:.6rem 0 0;}
+  #activationScreen .act-btn{margin-top:1.1rem;}
+  #activationScreen .act-btn:disabled{opacity:.6; cursor:not-allowed;}
+  #activationScreen input#activationInput:disabled{opacity:.7;}
+  #activationScreen .act-foot{font-family:system-ui; font-size:12px; color:var(--olive-light); margin-top:1.4rem;}
   /* cloud banner in editor */
   .cloud-banner{font-family:system-ui; font-size:13px; line-height:1.7; border-radius:14px; padding:10px 14px; margin-bottom:1rem; text-align:center;}
   .cloud-banner.on{background:#E7EDDA; color:var(--olive-dark); border:1.5px solid var(--olive-border);}
@@ -265,6 +280,16 @@
 </style>
 </head>
 <body>
+<div id="activationScreen">
+  <div class="act-card">
+    <h1 style="margin-bottom:2px;">تحدي الصور</h1>
+    <h1 style="font-size:22px; margin-bottom:.2rem;">تفعيل اللعبة</h1>
+    <p class="act-sub">أدخل كود التفعيل الخاص بك لبدء اللعب</p>
+    <input id="activationInput" type="text" inputmode="text" maxlength="12" placeholder="TH-XXXX-XXXX" autocomplete="off" autocapitalize="characters" spellcheck="false">
+    <p class="act-error" id="activationError"></p>
+    <button class="btn btn-primary act-btn" id="activationSubmit"><i class="ti ti-shield"></i> <span id="activationBtnText">تفعيل</span></button>
+  </div>
+</div>
 <div id="shareNotice">
   <div class="rotate-inner">
     <div class="rotate-ico"><span class="share-ico-big"><svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v13"/><path d="M8 7l4-4 4 4"/><rect x="5" y="11" width="14" height="10" rx="2.5"/></svg></span></div>
@@ -451,6 +476,7 @@
     <div class="modal" style="text-align:center;">
       <h3>القائمة</h3>
       <button class="btn btn-primary" style="margin-top:6px;" onclick="closeGameMenu()"><i class="ti ti-player-play"></i> متابعة</button>
+      <button class="btn btn-outline" style="margin-top:10px;" onclick="closeGameMenu();showQR();"><i class="ti ti-qrcode"></i> باركود الحكم</button>
       <button class="btn btn-outline" style="margin-top:10px;" onclick="toggleFullscreen()"><i class="ti ti-maximize"></i> ملء الشاشة</button>
       <button class="btn btn-outline" style="margin-top:10px;" onclick="restartChallenge()"><i class="ti ti-refresh"></i> إعادة التحدي</button>
       <button class="btn btn-outline" style="margin-top:10px;" onclick="menuGoHome()"><i class="ti ti-home"></i> رجوع للصفحة الرئيسية</button>
@@ -478,6 +504,93 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 
 <script>
+/* ===== نظام أكواد التفعيل (تحقق عبر السيرفر على المسار /api/activate + حد 3 أجهزة لكل كود) ===== */
+var ACTIVATION_KEY='pc_activation_code';
+var DEVICE_ID_KEY='pc_device_id';
+
+function normalizeCode(v){
+  return (v||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+}
+function formatCodeInput(raw){
+  /* يقبل ما بعد بادئة TH فقط، وينسّق TH-XXXX-XXXX تلقائياً */
+  var v=normalizeCode(raw);
+  if(v.indexOf('TH')===0){ v=v.slice(2); }
+  v=v.slice(0,8);
+  var out='TH';
+  if(v.length>0) out+='-'+v.slice(0,4);
+  if(v.length>4) out+='-'+v.slice(4,8);
+  return out;
+}
+function getDeviceId(){
+  var id=null;
+  try{ id=localStorage.getItem(DEVICE_ID_KEY); }catch(e){}
+  if(!id){
+    id=(window.crypto&&crypto.randomUUID)?crypto.randomUUID():('dev-'+Date.now()+'-'+Math.random().toString(36).slice(2));
+    try{ localStorage.setItem(DEVICE_ID_KEY,id); }catch(e){}
+  }
+  return id;
+}
+function isActivated(){
+  try{ return !!localStorage.getItem(ACTIVATION_KEY); }catch(e){ return false; }
+}
+function setActivated(code){
+  try{ localStorage.setItem(ACTIVATION_KEY,code); }catch(e){}
+}
+function setActivationBusy(busy){
+  var btn=document.getElementById('activationSubmit');
+  var txt=document.getElementById('activationBtnText');
+  var inp=document.getElementById('activationInput');
+  if(!btn||!txt)return;
+  btn.disabled=busy;
+  inp.disabled=busy;
+  txt.textContent=busy?'جاري التحقق...':'تفعيل';
+}
+function tryActivate(){
+  var inp=document.getElementById('activationInput');
+  var err=document.getElementById('activationError');
+  var raw=formatCodeInput(inp.value);
+  err.textContent='';
+  if(!/^TH-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(raw)){
+    err.textContent='أدخل الكود كاملاً بصيغة TH-XXXX-XXXX';
+    return;
+  }
+  setActivationBusy(true);
+  var deviceId=getDeviceId();
+  fetch('/api/activate',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({code:raw, deviceId:deviceId})
+  }).then(function(r){
+    return r.json().catch(function(){ return {success:false, message:'تعذّر الاتصال بالسيرفر، حاول مرة أخرى'}; });
+  }).then(function(data){
+    setActivationBusy(false);
+    if(data && data.success){
+      setActivated(raw);
+      err.textContent='';
+      document.documentElement.classList.remove('show-activation');
+    } else {
+      err.textContent=(data && data.message) || 'الكود غير صحيح';
+    }
+  }).catch(function(){
+    setActivationBusy(false);
+    err.textContent='تعذّر الاتصال بالسيرفر، تحقق من الإنترنت وحاول مجدداً';
+  });
+}
+function initActivationScreen(){
+  var inp=document.getElementById('activationInput');
+  var btn=document.getElementById('activationSubmit');
+  if(!inp||!btn)return;
+  inp.addEventListener('input',function(){
+    var pos=inp.selectionStart;
+    var before=inp.value.length;
+    inp.value=formatCodeInput(inp.value);
+    var after=inp.value.length;
+    try{ inp.selectionStart=inp.selectionEnd=pos+(after-before); }catch(e){}
+    document.getElementById('activationError').textContent='';
+  });
+  inp.addEventListener('keydown',function(e){ if(e.key==='Enter'){ tryActivate(); } });
+  btn.addEventListener('click',tryActivate);
+}
 /* fixed-aspect stage: scale to fit viewport, keep ratio, center (contain) */
 function fitStage(){
   var stage=document.getElementById('stage');
@@ -1219,12 +1332,21 @@ function applyPlatformSteps(){
 }
 function updateNotices(){
   var root=document.documentElement;
-  root.classList.remove('show-share','show-rotate');
-  if(!isPhone()){ return; } // tablets/desktop: play directly
-  if(!isStandalone()){ applyPlatformSteps(); root.classList.add('show-share'); return; } // browser: ask to add to home
-  var portrait = window.matchMedia('(orientation: portrait)').matches;
-  if(portrait){ root.classList.add('show-rotate'); } // installed but portrait: rotate
+  root.classList.remove('show-share','show-rotate','show-activation');
+  if(isPhone()){
+    if(!isStandalone()){ applyPlatformSteps(); root.classList.add('show-share'); return; } // 1) متصفح: أضف للشاشة الرئيسية
+    var portrait = window.matchMedia('(orientation: portrait)').matches;
+    if(portrait){ root.classList.add('show-rotate'); return; } // 2) مثبّتة لكن عمودية: دوّر الجهاز
+  }
+  if(!isActivated()){ // 3) بعد اجتياز الخطوتين السابقتين (أو تبلت/كمبيوتر): كود التفعيل
+    root.classList.add('show-activation');
+    setTimeout(function(){
+      var inp=document.getElementById('activationInput');
+      if(inp) inp.focus();
+    },200);
+  }
 }
+initActivationScreen();
 updateNotices();
 window.addEventListener('resize',updateNotices);
 window.addEventListener('orientationchange',function(){setTimeout(updateNotices,150);});
