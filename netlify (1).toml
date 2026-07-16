@@ -1,0 +1,18 @@
+[build]
+  command = "npm install"
+  functions = "netlify/functions"
+  publish = "."
+
+[functions]
+  included_files = ["codes.json"]
+
+[[redirects]]
+  from = "/api/activate"
+  to = "/.netlify/functions/activate"
+  status = 200
+  force = true
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
